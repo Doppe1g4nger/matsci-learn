@@ -19,9 +19,6 @@ __authors__ = ["Alex Dunn <ardunn@lbl.gov>",
                "Alireza Faghaninia <alireza@lbl.gov>"]
 
 
-# todo: Add options for scaling (only on number cols. should be relabeled as _scaled) - AD
-
-
 class DataCleaner(DataframeTransformer, LoggableMixin):
     """
     Transform a featurized dataframe into an ML-ready dataframe.
@@ -67,8 +64,7 @@ class DataCleaner(DataframeTransformer, LoggableMixin):
 
     def __init__(self, scale=False, max_na_frac=0.01, na_method='drop',
                  encode_categories=True, encoder='one-hot',
-                 drop_na_targets=True,
-                 logger=True):
+                 drop_na_targets=True, logger=True):
         self._logger = self.get_logger(logger)
         self.scale = scale
         self.max_na_frac = max_na_frac
@@ -141,12 +137,12 @@ class DataCleaner(DataframeTransformer, LoggableMixin):
 
         # Ensure the order of columns is identical
         if target in df.columns:
-            self.logger.info("Target not found in df columns. Ignoring...")
+            self.logger.info("Reordering columns...")
             df = df[self.fitted_df.columns]
         else:
-            colstodrop = self.fitted_df.drop(columns=[target]).columns.tolist()
-            df = df[colstodrop]
-
+            self.logger.info("Target not found in df columns. Ignoring...")
+            reordered_cols = self.fitted_df.drop(columns=[target]).columns.tolist()
+            df = df[reordered_cols]
         return df
 
     def fit_transform(self, df, target):
@@ -265,7 +261,10 @@ class DataCleaner(DataframeTransformer, LoggableMixin):
         self.object_cols = []
         for c in df.columns.values:
             try:
-                df[c] = pd.to_numeric(df[c])
+                if df[c].dtype == bool:
+                    df[c] = df[c].astype(int)
+                else:
+                    df[c] = pd.to_numeric(df[c])
                 if c != target:
                     self.number_cols.append(c)
             except (TypeError, ValueError):
@@ -357,7 +356,7 @@ class FeatureReducer(DataframeTransformer, LoggableMixin):
                     feature reduction, using ._feature_importances implemented
                     in sklearn. Retains feature names.
 
-                'relief': Perform ReliefF feature reduction using the skrebate
+                'rebate': Perform ReliefF feature reduction using the skrebate
                     package. Retains feature names.
 
                 'pca': Perform Principal Component Analysis via
@@ -367,10 +366,16 @@ class FeatureReducer(DataframeTransformer, LoggableMixin):
 
             Example: Apply tree-based feature reduction, then pca:
                 reducers = ('tree', 'pca')
-        n_pca_features (int): The number of features to be retained by PCA, if
-            PCA is present in the reducers
-        n_rebate_features (int): The number of ReBATE relief features to be
-            retained, if ReBATE is present in the reducers.
+        n_pca_features (int, float): If int, the number of features to be
+            retained by PCA. If float, the fraction of features to be retained
+            by PCA once the dataframe is passed to it (i.e., 0.5 means PCA
+            retains half of the features it is passed). PCA must be present in
+            the reducers.
+        n_rebate_features (int, float): If int, the number of ReBATE relief
+            features to be retained. If float, the fraction of features to be
+            retained by ReBATE once it is passed the dataframe (i.e., 0.5 means
+            ReBATE retains half of the features it is passed). ReBATE must be
+            present in the reducers.
         logger (Logger, bool): A custom logger object to use for logging.
             Alternatively, if set to True, the default mslearn logger will be
             used. If set to False, then no logging will occur.
@@ -386,8 +391,8 @@ class FeatureReducer(DataframeTransformer, LoggableMixin):
             applied. The values are the parameters used by each feature reducer.
     """
 
-    def __init__(self, reducers=('corr', 'tree'), n_pca_features=15,
-                 n_rebate_features=15, logger=True):
+    def __init__(self, reducers=('corr', 'tree'), n_pca_features=0.3,
+                 n_rebate_features=0.3, logger=True):
         for reducer in reducers:
             if reducer not in ["corr", "tree", "rebate", "pca"]:
                 raise ValueError(
@@ -403,6 +408,7 @@ class FeatureReducer(DataframeTransformer, LoggableMixin):
 
     @set_fitted
     def fit(self, df, target):
+        reduced_df = df
         for r in self.reducers:
             if r == "corr":
                 reduced_df = self.rm_correlated(df, target)
@@ -422,6 +428,12 @@ class FeatureReducer(DataframeTransformer, LoggableMixin):
                         "mode": tbfr.mode,
                         "random_state": tbfr.rs}
                 elif r == "rebate":
+                    if isinstance(self.n_rebate_features, float):
+                        self.logger.info("Retaining fraction {} of current "
+                                         "{} features.".format(
+                            self.n_rebate_features, df.shape[1]))
+                        self.n_rebate_features = int(df.shape[1] *
+                                                     self.n_rebate_features)
                     self.logger.info(
                         "ReBATE MultiSURF running: retaining {} numerical "
                         "features.".format(self.n_rebate_features))
@@ -437,6 +449,12 @@ class FeatureReducer(DataframeTransformer, LoggableMixin):
 
                 # todo: PCA will not work with string columns!!!!!
                 elif r == "pca":
+                    if isinstance(self.n_pca_features, float):
+                        self.logger.info("Retaining fraction {} of current "
+                                         "{} features.".format(
+                            self.n_pca_features, df.shape[1]))
+                        self.n_pca_features = int(df.shape[1] *
+                                                  self.n_pca_features)
                     self.logger.info("PCA running: retaining {} numerical "
                                      "features.".format(self.n_rebate_features))
                     matrix = PCA(
@@ -518,4 +536,11 @@ class FeatureReducer(DataframeTransformer, LoggableMixin):
 
 
 if __name__ == "__main__":
-    pass
+    from matminer.datasets.dataset_retrieval import load_dataset
+    from mslearn.pipeline import MatPipe, debug_config
+    target = "eij_max"
+    df = load_dataset("piezoelectric_tensor").rename(columns={"formula": "composition"})[[target, "composition", "structure"]]
+
+    mp = MatPipe(**debug_config)
+    df2 = mp.benchmark(df, target, test_spec=0.2)
+    print(df2)

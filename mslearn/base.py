@@ -16,7 +16,7 @@ class LoggableMixin(object):
 
     @property
     def logger(self):
-        """Get the class logger.
+        """Get the class lowgger.
         If the logger is None, the logging calls will be redirected to a dummy
         logger that has no output.
         """
@@ -53,6 +53,9 @@ class DataframeTransformer:
     """
     A base class to allow easy transformation in the same way as
     TransformerMixin and BaseEstimator in sklearn.
+
+    When implementing a base class adaptor, make sure to use @check_fitted
+    and @set_fitted if necessary!
     """
     def fit(self, df, target):
         """
@@ -63,7 +66,7 @@ class DataframeTransformer:
             target (str): the target string specifying the ML target.
 
         Returns:
-            (AutoMLAdaptor) This object (self)
+            (DataFrameTransformer) This object (self)
 
         """
         raise NotImplementedError("{} has no fit method implemented!".format(self.__class__.__name__))
@@ -101,6 +104,9 @@ class AutoMLAdaptor(DataframeTransformer):
     """
     A base class to adapt from an AutoML backend to a sklearn-style fit/predict
     scheme and add a few extensions.
+
+    When implementing a base class adaptor, make sure to use @check_fitted
+    and @set_fitted if necessary!
     """
     def transform(self, df, target):
         return self.predict(df, target)
@@ -152,17 +158,17 @@ class AutoMLAdaptor(DataframeTransformer):
         except AttributeError:
             raise NotImplementedError("{} has no ML data attr implemented!".format(self.__class__.__name__))
 
-
     @property
-    def best_models(self):
+    def best_pipeline(self):
         """
-        The best models returned by the AutoML backend.
+        The best pipeline returned by the automl backend. Should implement fit
+        and predict methods and be able to make predictions.
 
         Returns:
-            (list or OrderedDict}: The best models as determined by the AutoML package.
+            sklearn.pipeline.Pipeline or BaseEstimator:
         """
         try:
-            return self._best_models
+            return self._best_pipeline
         except AttributeError:
             raise NotImplementedError("{} has no best models attr implemented!".format(self.__class__.__name__))
 
