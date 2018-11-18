@@ -1,7 +1,9 @@
-from sklearn.exceptions import NotFittedError
+from multiprocessing import cpu_count
+
 from pymatgen import Composition
 from matminer.featurizers.conversions import StructureToOxidStructure, \
-    StrToComposition, DictToObject, StructureToComposition
+    StrToComposition, DictToObject, StructureToComposition, \
+    CompositionToOxidComposition
 
 from mslearn.utils.package_tools import check_fitted, set_fitted
 from mslearn.base import DataframeTransformer, LoggableMixin
@@ -26,79 +28,6 @@ _bandstructure_aliases = ["bandstructure", "bs", "bsdos", "BS", "BSDOS",
                           "Bandstructure"]
 _dos_aliases = ["density of states", "dos", "DOS", "Density of States"]
 _aliases = _composition_aliases + _structure_aliases + _bandstructure_aliases + _dos_aliases
-
-
-# todo: use the matminer version once its fixed and pushed
-from matminer.featurizers.conversions import ConversionFeaturizer
-class CompositionToOxidComposition(ConversionFeaturizer):
-    """Utility featurizer to add oxidation states to a pymatgen Composition.
-
-    Oxidation states are determined using pymatgen's guessing routines.
-    The expected input is a `pymatgen.core.composition.Composition` object.
-
-    Note that this Featurizer does not produce machine learning-ready features
-    but instead can be applied to pre-process data or as part of a Pipeline.
-
-    Args:
-        **kwargs: Parameters to control the settings for
-            `pymatgen.io.structure.Structure.add_oxidation_state_by_guess()`.
-        target_col_id (str or None): The column in which the converted data will
-            be written. If the column already exists then an error will be
-            thrown unless `overwrite_data` is set to `True`. If `target_col_id`
-            begins with an underscore the data will be written to the column:
-            `"{}_{}".format(col_id, target_col_id[1:])`, where `col_id` is the
-            column being featurized. If `target_col_id` is set to None then
-            the data will be written "in place" to the `col_id` column (this
-            will only work if `overwrite_data=True`).
-        overwrite_data (bool): Overwrite any data in `target_column` if it
-            exists.
-        coerce_mixed (bool): If a composition has both species containing
-            oxid states and not containing oxid states, strips all of the
-            oxid states and guesses the entire composition's oxid states.
-
-    """
-
-    def __init__(self, target_col_id='composition_oxid', overwrite_data=False,
-                 coerce_mixed=True, **kwargs):
-        super().__init__(target_col_id, overwrite_data)
-        self.oxi_guess_params = kwargs
-        self.coerce_mixed = coerce_mixed
-
-    def featurize(self, comp):
-        """Add oxidation states to a Structure using pymatgen's guessing routines.
-
-        Args:
-            comp (`pymatgen.core.composition.Composition`): A composition.
-
-        Returns:
-            (`pymatgen.core.composition.Composition`): A Composition object
-                decorated with oxidation states.
-        """
-        els_have_oxi_states = [hasattr(s, "oxi_state") for s in comp.elements]
-        if all(els_have_oxi_states):
-            return [comp]
-        elif any(els_have_oxi_states):
-            if self.coerce_mixed:
-                comp = comp.element_composition
-            else:
-                raise ValueError("Composition {} has a mix of species with "
-                                 "and without oxidation states. Please enable "
-                                 "coercion to all oxidation states with "
-                                 "coerce_mixed.".format(comp))
-        return [comp.add_charges_from_oxi_state_guesses(
-            **self.oxi_guess_params)]
-
-    def citations(self):
-        return [(
-            "@article{ward_agrawal_choudary_wolverton_2016, title={A "
-            "general-purpose machine learning framework for predicting "
-            "properties of inorganic materials}, volume={2}, "
-            "DOI={10.1038/npjcompumats.2017.28}, number={1}, journal={npj "
-            "Computational Materials}, author={Ward, Logan and Agrawal, Ankit "
-            "and Choudhary, Alok and Wolverton, Christopher}, year={2016}}")]
-
-    def implementors(self):
-        return ["Anubhav Jain", "Alex Ganose", "Alex Dunn"]
 
 
 class AutoFeaturizer(DataframeTransformer, LoggableMixin):
@@ -149,7 +78,7 @@ class AutoFeaturizer(DataframeTransformer, LoggableMixin):
             state.
         multiiindex (bool): If True, returns a multiindexed dataframe.
         n_jobs (int): The number of parallel jobs to use during featurization
-            for each featurizer. -1 sets n_jobs = n_cores
+            for each featurizer. Default is n_cores
         logger (Logger, bool): A custom logger object to use for logging.
             Alternatively, if set to True, the default mslearn logger will be
             used. If set to False, then no logging will occur.
@@ -177,7 +106,7 @@ class AutoFeaturizer(DataframeTransformer, LoggableMixin):
 
         self._logger = self.get_logger(logger)
         self.featurizers = featurizers
-        self.exclude = exclude
+        self.exclude = exclude if exclude else []
         self.use_metaselector = use_metaselector
         self.max_na_percent = max_na_frac
         self.ignore_cols = ignore_cols or []
@@ -245,6 +174,8 @@ class AutoFeaturizer(DataframeTransformer, LoggableMixin):
         Returns:
             df (pandas.DataFrame): Transformed dataframe containing features.
         """
+
+        #todo: structure to oxidstructure + comp2oxidcomp can get called twice by _tidy_column
         df = self._prescreen_df(df, inplace=True)
         df = self._add_composition_from_structure(df)
 
@@ -309,9 +240,7 @@ class AutoFeaturizer(DataframeTransformer, LoggableMixin):
                                      "returning nans more than the "
                                      "max_na_percent of {}: {}".
                                      format(self.max_na_percent, auto_exclude))
-                    if self.exclude:
-                        auto_exclude.extend(self.exclude)
-                    self.exclude = auto_exclude
+                    self.exclude.extend(auto_exclude)
 
             for featurizer_type in _supported_featurizer_types.keys():
                 if featurizer_type in df.columns:
@@ -371,7 +300,8 @@ class AutoFeaturizer(DataframeTransformer, LoggableMixin):
                 stc = StrToComposition(overwrite_data=True,
                                        target_col_id=featurizer_type)
                 df = stc.featurize_dataframe(df, featurizer_type,
-                                             multiindex=self.multiindex)
+                                             multiindex=self.multiindex,
+                                             ignore_errors=True)
 
             elif isinstance(df[featurizer_type].iloc[0], dict):
                 self.logger.info("Compositions detected as dicts. Attempting "
@@ -385,14 +315,22 @@ class AutoFeaturizer(DataframeTransformer, LoggableMixin):
                 cto = CompositionToOxidComposition(
                     target_col_id=featurizer_type,
                     overwrite_data=True)
-                df = cto.featurize_dataframe(df, featurizer_type,
-                                             multiindex=self.multiindex)
+                try:
+                    df = cto.featurize_dataframe(df, featurizer_type,
+                                                 multiindex=self.multiindex)
+                except Exception as e:
+                    self.logger.info("Could not decorate oxidation states due "
+                                     "to {}. Excluding featurizers based on "
+                                     "composition oxistates".format(e))
+                    classes_require_oxi = [c.__class__.__name__ for c in
+                                           CompositionFeaturizers().need_oxi]
+                    self.exclude.extend(classes_require_oxi)
 
         else:
             # Convert structure/bs/dos dicts to objects (robust already)
             self.logger.info("{} detected as strings. Attempting "
-                             "conversion to Composition objects..."
-                             "".format(featurizer_type))
+                             "conversion to {} objects..."
+                             "".format(featurizer_type, featurizer_type))
             dto = DictToObject(overwrite_data=True, target_col_id=featurizer_type)
             df = dto.featurize_dataframe(df, featurizer_type)
 
@@ -402,8 +340,12 @@ class AutoFeaturizer(DataframeTransformer, LoggableMixin):
                                  "they were not present in input.")
                 sto = StructureToOxidStructure(target_col_id=featurizer_type,
                                                overwrite_data=True)
-                df = sto.featurize_dataframe(df, featurizer_type,
+                try:
+                    df = sto.featurize_dataframe(df, featurizer_type,
                                              multiindex=self.multiindex)
+                except Exception as e:
+                    self.logger.info("Could not decorate oxidation states on"
+                                        " structures due to {}.".format(e))
         return df
 
     def _add_composition_from_structure(self, df):
@@ -431,11 +373,7 @@ class AutoFeaturizer(DataframeTransformer, LoggableMixin):
 
 if __name__ == "__main__":
     from matminer.datasets.dataset_retrieval import load_dataset
-    df = load_dataset("flla")
-    df = df.iloc[:100]
-    df = df[["structure",  "e_above_hull"]]
-    print(df)
+    df = load_dataset("steel_strength").rename(columns={"formula": "composition"})[["yield strength", "composition"]]
     af = AutoFeaturizer()
-    af.fit(df, "e_above_hull")
-    df = af.transform(df, "e_above_hull")
-    print(df.columns.tolist())
+    print(df)
+    df = af.fit_transform(df, "yield strength")
