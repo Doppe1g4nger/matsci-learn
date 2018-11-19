@@ -83,14 +83,14 @@ if __name__ == '__main__':
             test_features = features[test_index]
             test_target = target[test_index]
 
+            # Normalization is unique to each sample, doesn't need fit
+            train_features = normalizer.transform(train_features)
+            test_features = normalizer.transform(test_features)
+
             # Fit scaling on training data, don't see training data
             scaler.fit(train_features)
             train_features = scaler.transform(train_features)
             test_features = scaler.transform(test_features)
-
-            # Normalization is unique to each sample, doesn't need fit
-            train_features = normalizer.transform(train_features)
-            test_features = normalizer.transform(test_features)
 
             model.fit(train_features, train_target)
 
