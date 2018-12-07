@@ -13,8 +13,8 @@ import numpy as np
 from matminer.utils.io import load_dataframe_from_json
 # from matminer.datasets.convenience_loaders import load_tehrani_superhard_mat
 
-from mslearn.pipeline import MatPipe
-from mslearn.analytics import Analytics
+from automatminer.pipeline import MatPipe
+from automatminer.analytics import Analytics
 
 """
 This script reproduces the results found by Tehrani et al in the following:

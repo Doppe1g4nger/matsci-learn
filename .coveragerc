@@ -1,5 +1,5 @@
 [run]
-source=mslearn
+source=automatminer
 
 [report]
 exclude_lines =
@@ -15,3 +15,8 @@ omit =
     *tests/*
     */versioneer.py
     */_version.py
+    */*.md
+    */*.gitignore
+    */*.txt
+    */setup.py
+    */__init__.py
