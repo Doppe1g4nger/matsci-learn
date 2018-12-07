@@ -1,4 +1,5 @@
-from math import sqrt, floor
+import os
+from math import sqrt
 from time import sleep
 
 from sklearn import preprocessing
@@ -12,9 +13,8 @@ import numpy as np
 from matminer.utils.io import load_dataframe_from_json
 # from matminer.datasets.convenience_loaders import load_tehrani_superhard_mat
 
-from mslearn.featurization import AutoFeaturizer
-from mslearn.preprocessing import DataCleaner, FeatureReducer
-from mslearn.automl.adaptors import TPOTAdaptor
+from mslearn.pipeline import MatPipe
+from mslearn.analytics import Analytics
 
 """
 This script reproduces the results found by Tehrani et al in the following:
@@ -135,28 +135,33 @@ if __name__ == '__main__':
         sleep(1)
 
     # COMPARE TO MATBENCH
-    # df = load_tehrani_superhard_mat(data="basic_descriptors")
-    #
-    # df = df.drop(["shear_modulus"], axis=1)
-    # traindf = df.iloc[:floor(.8 * len(df))]
-    # testdf = df.iloc[floor(.8 * len(df)):]
-    # target = "bulk_modulus"
-    #
-    # # Get top-level transformers
-    # autofeater = AutoFeaturizer()
-    # cleaner = DataCleaner()
-    # reducer = FeatureReducer()
-    # learner = TPOTAdaptor("regression", max_time_mins=5)
-    #
-    # # Fit transformers on training data
-    # traindf = autofeater.fit_transform(traindf, target)
-    # traindf = cleaner.fit_transform(traindf, target)
-    # traindf = reducer.fit_transform(traindf, target)
-    # learner.fit(traindf, target)
-    #
-    # # Apply the same transformations to the testing data
-    # testdf = autofeater.transform(testdf, target)
-    # testdf = cleaner.transform(testdf, target)
-    # testdf = reducer.transform(testdf, target)
-    # testdf = learner.predict(testdf, target)    #predict validation data
-    # print(testdf)
+    df = load_tehrani_superhard_mat(data="basic_descriptors")
+
+    bulk_train = df.drop(["shear_modulus"], axis=1)
+
+    if not os.path.exists("bulk_modulus_test_pipe.p"):
+        fitted_pipeline = MatPipe().fit(bulk_train, "bulk_modulus")
+        fitted_pipeline.save("bulk_modulus_test_pipe.p")
+    else:
+        fitted_pipeline = MatPipe.load("bulk_modulus_test_pipe.p")
+
+    analyzer = Analytics(fitted_pipeline)
+    print(analyzer.get_feature_importance())
+    feats = list(reversed(analyzer.get_feature_importance().index))
+
+    for feat in feats:
+        analyzer.plot_partial_dependence(feat, save_plot=True, show_plot=False)
+
+    shear_train = df.drop(["bulk_modulus"], axis=1)
+
+    if not os.path.exists("shear_modulus_test_pipe.p"):
+        fitted_pipeline = MatPipe().fit(shear_train, "shear_modulus")
+        fitted_pipeline.save("shear_modulus_test_pipe.p")
+    else:
+        fitted_pipeline = MatPipe.load("shear_modulus_test_pipe.p")
+
+    analyzer = Analytics(fitted_pipeline)
+    feats = list(reversed(analyzer.get_feature_importance().index))
+
+    for feat in feats:
+        analyzer.plot_partial_dependence(feat, save_plot=True, show_plot=False)

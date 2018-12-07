@@ -39,14 +39,25 @@ class Analytics:
 
     def plot_partial_dependence(self, feature_ids, save_plot=False,
                                 show_plot=True):
-        fig, ax = self.get_partial_dependence(feature_ids)
+        if not isinstance(feature_ids, list):
+            feature_ids = [feature_ids]
 
-        fig.suptitle("Model dependance on {}".format(feature_ids[0]))
-        ax.set_ylabel("Average predicited {}".format(self.target))
+        pretty_feature = " ".join(feature_ids[0].split("_"))
+        pretty_target = " ".join(map(str.capitalize, self.target.split("_")))
+
+        plt.rcParams.update({'font.size': 24})
+
+        fig, ax = self.get_partial_dependence(feature_ids)
+        ax.set_frame_on(False)
+
+        ax.set_title("Model dependence on {}".format(pretty_feature))
+        ax.set_ylabel("Average predicted {}".format(pretty_target))
         plt.ticklabel_format(style='plain', axis='y', scilimits=(0, 0))
+        plt.legend().get_texts()[0].set_text(pretty_target)
+        plt.tight_layout()
 
         if save_plot:
-            plt.savefig(feature_ids[0] + "_pdp.png")
+            plt.savefig("_".join([feature_ids[0], self.target, "pdp.png"]))
 
         if show_plot:
             plt.show()
@@ -60,12 +71,9 @@ class Analytics:
                              "computing plots for more than one feature at a "
                              "time")
 
-        axs = self.interpreter.partial_dependence.plot_partial_dependence(
-            feature_ids, self.model, sample=False, progressbar=False,
-            with_variance=True
+        return self.interpreter.partial_dependence.partial_dependence(
+            feature_ids, self.model, sample=False, progressbar=False
         )
-
-        return axs[0][0], axs[0][1]
 
 
 if __name__ == '__main__':
@@ -77,11 +85,10 @@ if __name__ == '__main__':
         fitted_pipeline = MatPipe().fit(df, "K_VRH")
         fitted_pipeline.save("tests/test_pipe.p")
     else:
-        fitted_pipeline = MatPipe().load("tests/test_pipe.p")
+        fitted_pipeline = MatPipe.load("tests/test_pipe.p")
 
     analyzer = Analytics(fitted_pipeline)
 
-    feature_importance = analyzer.get_feature_importance()
+    x = analyzer.get_partial_dependence(analyzer.feature_labels[0])
 
-    for feature in reversed(feature_importance.index):
-        analyzer.plot_partial_dependence(feature)
+    print(x)
